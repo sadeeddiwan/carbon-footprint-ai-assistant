@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "source": "DEFRA 2023 GHG Conversion Factors + ADEME 2022",
+    "unit": "gCO2e per passenger-kilometre",
+    "url": "https://www.gov.uk/government/collections/government-conversion-factors-for-company-reporting"
+  },
+  "car":                170.0,
+  "car_shared":          85.0,
+  "train":               35.7,
+  "subway":              27.3,
+  "bus":                 89.0,
+  "tram":                28.9,
+  "bicycle":              0.0,
+  "e_bicycle":            4.5,
+  "walking":              0.0,
+  "motorcycle":         103.0,
+  "ev_car":              47.0,
+  "taxi":               186.0,
+  "flight_domestic":    246.0,
+  "flight_short_haul":  151.0,
+  "ferry":               18.9
+}
