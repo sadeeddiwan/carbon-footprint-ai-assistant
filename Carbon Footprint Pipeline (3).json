@@ -1,0 +1,466 @@
+{
+  "name": "Carbon Footprint Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "79dacee1-4cb5-4e3f-945b-d6202f710531",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/data/synthetic_data.csv",
+        "options": {}
+      },
+      "id": "6419c69e-2939-41cd-b192-b5808a2bc833",
+      "name": "Read CSV",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const FACTORS = {\ncar: 170.0,\ncar_shared: 85.0,\ntrain: 35.7,\nsubway: 27.3,\nbus: 89.0,\ntram: 28.9,\nbicycle: 0.0,\ne_bicycle: 4.5,\nwalking: 0.0,\nmotorcycle: 103.0,\nev_car: 47.0,\ntaxi: 186.0,\nflight_domestic: 246.0,\nflight_short_haul: 151.0,\nferry: 18.9\n};\n\n// Read the CSV binary safely from the previous Read CSV node\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nlet csvText = buffer.toString('utf8');\n\n// Remove UTF-8 BOM and surrounding whitespace\ncsvText = csvText.replace(/^\\uFEFF/, '').trim();\n\nif (!csvText) {\nthrow new Error('CSV file is empty');\n}\n\nfunction parseDate(value) {\nconst input = String(value || '').trim();\nlet date;\n\n// DD-MM-YYYY\nif (/^\\d{2}-\\d{2}-\\d{4}$/.test(input)) {\nconst [day, month, year] = input.split('-').map(Number);\ndate = new Date(Date.UTC(year, month - 1, day));\n}\n\n// YYYY-MM-DD\nelse if (/^\\d{4}-\\d{2}-\\d{2}$/.test(input)) {\nconst [year, month, day] = input.split('-').map(Number);\ndate = new Date(Date.UTC(year, month - 1, day));\n}\n\nelse {\nthrow new Error(`Unsupported date format: ${input}`);\n}\n\nif (Number.isNaN(date.getTime())) {\nthrow new Error(`Invalid date: ${input}`);\n}\n\nreturn date;\n}\n\nfunction getIsoWeek(date) {\nconst workingDate = new Date(date);\nconst day = workingDate.getUTCDay() || 7;\n\nworkingDate.setUTCDate(\nworkingDate.getUTCDate() + 4 - day\n);\n\nconst yearStart = new Date(\nDate.UTC(workingDate.getUTCFullYear(), 0, 1)\n);\n\nreturn Math.ceil(\n(((workingDate - yearStart) / 86400000) + 1) / 7\n);\n}\n\n// Split CSV into rows\nconst lines = csvText.split(/\\r?\\n/);\n\nif (lines.length < 2) {\nthrow new Error('CSV contains no data rows');\n}\n\n// Clean header names, including BOM and quotation marks\nconst headers = lines[0]\n.replace(/^\\uFEFF/, '')\n.split(',')\n.map(header =>\nheader\n.trim()\n.replace(/^\"|\"$/g, '')\n);\n\nconst requiredColumns = [\n'persona_id',\n'date',\n'transport_mode',\n'distance_km',\n'origin',\n'destination'\n];\n\nfor (const column of requiredColumns) {\nif (!headers.includes(column)) {\nthrow new Error(\n`Missing CSV column: ${column}. Found headers: ${headers.join(', ')}`\n);\n}\n}\n\nconst records = [];\nconst rejectedRows = [];\n\nfor (let rowIndex = 1; rowIndex < lines.length; rowIndex++) {\nconst line = lines[rowIndex].trim();\n\nif (!line) {\ncontinue;\n}\n\nconst values = line\n.split(',')\n.map(value =>\nvalue\n.trim()\n.replace(/^\"|\"$/g, '')\n);\n\nconst row = {};\n\nheaders.forEach((header, index) => {\nrow[header] = values[index] ?? '';\n});\n\nconst mode = String(row.transport_mode || '')\n.trim()\n.toLowerCase();\n\nconst distance = Number(row.distance_km);\n\nif (!mode || !(mode in FACTORS)) {\nrejectedRows.push({\nrow_number: rowIndex + 1,\nreason: `Unsupported transport mode: ${mode}`,\nrow\n});\ncontinue;\n}\n\nif (!Number.isFinite(distance) || distance < 0) {\nrejectedRows.push({\nrow_number: rowIndex + 1,\nreason: `Invalid distance: ${row.distance_km}`,\nrow\n});\ncontinue;\n}\n\nlet parsedDate;\n\ntry {\nparsedDate = parseDate(row.date);\n} catch (error) {\nrejectedRows.push({\nrow_number: rowIndex + 1,\nreason: error.message,\nrow\n});\ncontinue;\n}\n\nconst factor = FACTORS[mode];\nconst co2eGrams = Math.round(\ndistance * factor * 100\n) / 100;\n\nrecords.push({\npersona_id: row.persona_id,\ndate: parsedDate.toISOString().slice(0, 10),\noriginal_date: row.date,\nweek_number: getIsoWeek(parsedDate),\ntransport_mode: mode,\ndistance_km: distance,\nfactor_g_per_km: factor,\nco2e_grams: co2eGrams,\norigin: row.origin || '',\ndestination: row.destination || ''\n});\n}\n\nif (!records.length) {\nthrow new Error(\n`No valid records after parsing. Rejected rows: ${rejectedRows.length}`\n);\n}\n\nconsole.log(`Valid records: ${records.length}`);\nconsole.log(`Rejected rows: ${rejectedRows.length}`);\n\nreturn records.map(record => ({\njson: record\n}));"
+      },
+      "id": "e2dd4d29-057d-46c9-a6ee-7e73fc8ed0ce",
+      "name": "Calculate Emissions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        192
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $input.all().map(i => i.json);\n\nconst filteredRecords = records.filter(r => r.persona_id === 'pt_001');\n\nconst weeks = {};\nfor (const r of filteredRecords) {\n  const w = r.week_number;\n  if (!weeks[w]) weeks[w] = { total: 0, by_mode: {} };\n  weeks[w].total += r.co2e_grams;\n  weeks[w].by_mode[r.transport_mode] =\n    (weeks[w].by_mode[r.transport_mode] || 0) + r.co2e_grams;\n}\n\nconst sorted = Object.keys(weeks).map(Number).sort((a,b) => a-b);\nconst summaries = [];\nlet prevTotal = null;\n\nfor (const w of sorted) {\n  const total = Math.round(weeks[w].total * 10) / 10;\n  const dom = Object.entries(weeks[w].by_mode).sort((a,b) => b[1]-a[1])[0];\n  let change = 0, trend = 'first week';\n  if (prevTotal !== null && prevTotal > 0) {\n    change = Math.round((total - prevTotal) / prevTotal * 1000) / 10;\n    trend = change > 5 ? 'increasing' : change < -5 ? 'decreasing' : 'stable';\n  }\n  summaries.push({ week: w, total_co2e: total, by_mode: weeks[w].by_mode,\n    dominant_mode: dom?.[0] || 'unknown',\n    dominant_pct: dom ? Math.round(dom[1] / total * 100) : 0,\n    prev_total: prevTotal, change_pct: change, trend });\n  prevTotal = total;\n}\n\nconst latest = summaries[summaries.length - 1];\nreturn [{ json: { records: filteredRecords, summaries, ...latest } }];"
+      },
+      "id": "88b286e0-73c4-4e90-b5ce-68311e99ddf7",
+      "name": "Aggregate by Week",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "id": "b5622915-036a-4ef6-8967-61c9bf21f4c0",
+                    "leftValue": "={{ $json.trend }}",
+                    "rightValue": "increasing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "5648ee4b-24eb-47fa-ba7b-4eafa799d967",
+                    "leftValue": "={{ $json.change_pct }}",
+                    "rightValue": 10,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "Critical"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "f39f250b-41f4-4e49-bd84-d00fe3455527",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "alert_mode",
+              "type": "booleanValue"
+            },
+            {
+              "name": "tone",
+              "stringValue": "urgent"
+            },
+            {
+              "name": "context_note",
+              "stringValue": "Emissions have increased significantly. Prioritise the single most impactful action"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "12b109b0-691c-49ec-8a32-752c913c0be3",
+      "name": "Set Critical Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "alert_mode",
+              "type": "booleanValue",
+              "booleanValue": "false"
+            },
+            {
+              "name": "tone",
+              "stringValue": "informative"
+            },
+            {
+              "name": "context_note",
+              "stringValue": "Emissions are within normal range. Provide balanced, practical recommendations."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "75cd86fd-b27d-42bd-a7c3-1118a8fa3ce4",
+      "name": "Set Standard Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        0,
+        368
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f6d3d0bd-1e71-4a10-a49e-62bd31862a87",
+      "name": "Merge 1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const OLLAMA_URL = 'http://host.docker.internal:11434/api/chat';\nconst MODEL = 'mistral';\nconst MAX_STEPS = 6;\n\nconst input = $input.first().json;\n\nconst records     = Array.isArray(input.records)   ? input.records   : [];\nconst summaries   = Array.isArray(input.summaries) ? input.summaries : [];\nconst targetWeek  = Number(input.week);\nconst alertMode   = input.alert_mode === true;\nconst tone        = input.tone || (alertMode ? 'urgent' : 'informative');\nconst contextNote = input.context_note || '';\n\nif (!records.length)              throw new Error('ReAct Agent received no transport records');\nif (!Number.isFinite(targetWeek)) throw new Error('ReAct Agent received an invalid target week');\n\n// ─────────────────────────────────────────────────────────────\n// EMISSION FACTOR KNOWLEDGE\n// Used by fallback to give accurate mode-aware recommendations\n// ─────────────────────────────────────────────────────────────\nconst LOW_EMISSION_MODES  = ['bicycle', 'walking', 'e_bicycle'];\nconst MED_EMISSION_MODES  = ['train', 'subway', 'tram', 'bus'];\nconst HIGH_EMISSION_MODES = ['car', 'car_shared', 'motorcycle', 'ev_car', 'taxi',\n                              'flight_domestic', 'flight_short_haul', 'ferry'];\n\nconst EMISSION_FACTORS = {\n  car: 170, car_shared: 85, train: 35.7, subway: 27.3,\n  bus: 89, tram: 28.9, bicycle: 0, e_bicycle: 4.5,\n  walking: 0, motorcycle: 103, ev_car: 47, taxi: 186,\n  flight_domestic: 246, flight_short_haul: 151, ferry: 18.9\n};\n\nfunction getModeCategory(mode) {\n  if (LOW_EMISSION_MODES.includes(mode))  return 'low';\n  if (MED_EMISSION_MODES.includes(mode))  return 'medium';\n  if (HIGH_EMISSION_MODES.includes(mode)) return 'high';\n  return 'unknown';\n}\n\n// ─────────────────────────────────────────────────────────────\n// DETERMINISTIC TOOLS\n// ─────────────────────────────────────────────────────────────\n\nfunction getWeeklySummary(weekNumber) {\n  const week = Number(weekNumber);\n  const weekRecords = records.filter(r => Number(r.week_number) === week);\n  if (!weekRecords.length) return { error: `No data found for week ${week}` };\n\n  let total = 0;\n  const byMode = {};\n  for (const r of weekRecords) {\n    const e = Number(r.co2e_grams) || 0;\n    total += e;\n    byMode[r.transport_mode] = (byMode[r.transport_mode] || 0) + e;\n  }\n\n  const sorted   = Object.entries(byMode).sort((a, b) => b[1] - a[1]);\n  const dominant = sorted[0] || ['unknown', 0];\n\n  return {\n    week,\n    total_co2e:    Math.round(total * 10) / 10,\n    trip_count:    weekRecords.length,\n    by_mode:       Object.fromEntries(sorted.map(([m, v]) => [m, Math.round(v * 10) / 10])),\n    dominant_mode: dominant[0],\n    dominant_pct:  total > 0 ? Math.round((dominant[1] / total) * 1000) / 10 : 0\n  };\n}\n\nfunction getTopTrips(weekNumber, count = 3) {\n  const week  = Number(weekNumber);\n  const limit = Math.max(1, Number(count) || 3);\n  const top   = records\n    .filter(r => Number(r.week_number) === week)\n    .sort((a, b) => Number(b.co2e_grams) - Number(a.co2e_grams))\n    .slice(0, limit);\n\n  return {\n    week,\n    top_trips: top.map(r => ({\n      persona_id:  r.persona_id,\n      date:        r.date,\n      mode:        r.transport_mode,\n      distance_km: Number(r.distance_km),\n      co2e_grams:  Number(r.co2e_grams),\n      origin:      r.origin      || '',\n      destination: r.destination || ''\n    }))\n  };\n}\n\nfunction compareWeeks(firstWeek, secondWeek) {\n  const w1 = getWeeklySummary(firstWeek);\n  const w2 = getWeeklySummary(secondWeek);\n  if (w1.error || w2.error) return { error: 'One or both weeks not found' };\n\n  const diff      = w2.total_co2e - w1.total_co2e;\n  const changePct = w1.total_co2e > 0\n    ? Math.round((diff / w1.total_co2e) * 1000) / 10\n    : null;\n\n  let trend = 'stable';\n  if (changePct !== null) {\n    if (changePct >  5) trend = 'increasing';\n    if (changePct < -5) trend = 'decreasing';\n  }\n\n  return {\n    week1:            { week: w1.week, total_co2e: w1.total_co2e },\n    week2:            { week: w2.week, total_co2e: w2.total_co2e },\n    difference_gco2e: Math.round(diff * 10) / 10,\n    change_pct:       changePct,\n    trend\n  };\n}\n\nfunction dispatchTool(name, args) {\n  if (name === 'get_weekly_summary') return getWeeklySummary(args[0]);\n  if (name === 'get_top_trips')      return getTopTrips(args[0], args[1]);\n  if (name === 'compare_weeks')      return compareWeeks(args[0], args[1]);\n  return { error: `Unknown tool: ${name}` };\n}\n\nfunction parseAction(text) {\n  const match = text.match(/Action:\\s*(\\w+)\\(([^)]*)\\)/i);\n  if (!match) return null;\n  const args = match[2]\n    .split(',')\n    .map(v => v.trim())\n    .filter(v => v.length > 0)\n    .map(v => { const n = Number(v); return Number.isFinite(n) ? n : v; });\n  return { name: match[1], args };\n}\n\nfunction extractRecommendations(text) {\n  const marker = 'FINAL RECOMMENDATIONS:';\n  const idx    = text.toUpperCase().indexOf(marker);\n  if (idx === -1) return null;\n\n  const body = text.substring(idx + marker.length).trim();\n  if (!body) return null;\n\n  const hasNumbered = /[1-3][.)]\\s+\\S/.test(body);\n  return hasNumbered ? body : null;\n}\n\n// ─────────────────────────────────────────────────────────────\n// GROUNDED FALLBACK — mode-aware, never suggests a mode\n// the persona already uses as their primary mode\n// ─────────────────────────────────────────────────────────────\nfunction buildFallback() {\n  const summary  = getWeeklySummary(targetWeek);\n  const topTrips = getTopTrips(targetWeek, 3);\n  const topTrip  = topTrips.top_trips[0];\n  const prevWeek = targetWeek - 1;\n  const comparison = prevWeek > 0 ? compareWeeks(prevWeek, targetWeek) : null;\n\n  // Find which modes the persona actually uses this week\n  const modesUsed    = Object.keys(summary.by_mode || {});\n  const domMode      = summary.dominant_mode;\n  const domCategory  = getModeCategory(domMode);\n  const topTripMode  = topTrip?.mode || domMode;\n  const topCategory  = getModeCategory(topTripMode);\n\n  // ── Recommendation 1 — based on dominant mode category ──────────────────\n  let r1;\n  if (domCategory === 'high') {\n    r1 = `1. Prioritise reducing ${domMode.replace(/_/g,' ')} journeys — this mode generated ` +\n         `${summary.dominant_pct}% of Week ${targetWeek} emissions ` +\n         `(${(summary.by_mode[domMode] || 0).toLocaleString()} gCO₂e). ` +\n         `Switching even one day per week to train or bus makes a measurable difference.`;\n  } else if (domCategory === 'medium') {\n    // Already on public transport — suggest active travel for short legs\n    const highModes = modesUsed.filter(m => getModeCategory(m) === 'high');\n    if (highModes.length > 0) {\n      r1 = `1. Your main mode (${domMode}) is already low-emission. ` +\n           `Focus on reducing the remaining ${highModes.join(', ')} trips ` +\n           `which produce far more CO₂e per km.`;\n    } else {\n      r1 = `1. Your transport mix is already sustainable — ${domMode} generates only ` +\n           `${EMISSION_FACTORS[domMode] || '?'} gCO₂e/km. ` +\n           `Consider replacing any short legs with walking or cycling to reach zero emissions on those trips.`;\n    }\n  } else {\n    // Low emission dominant mode — truly green profile\n    r1 = `1. Excellent — your dominant mode (${domMode}) produces zero direct emissions. ` +\n         `Check if any remaining motorised trips can also be replaced with cycling or walking.`;\n  }\n\n  // ── Recommendation 2 — based on highest-emission single trip ────────────\n  let r2;\n  if (topTrip) {\n    if (topCategory === 'high') {\n      // Suggest switching to train\n      const trainSaving = Math.round(topTrip.distance_km * 35.7);\n      r2 = `2. The highest-emission trip this week was ${topTrip.distance_km} km ` +\n           `by ${topTrip.mode} from ${topTrip.origin || 'origin'} to ` +\n           `${topTrip.destination || 'destination'}, producing ${topTrip.co2e_grams} gCO₂e. ` +\n           `Switching this trip to train reduces it to approximately ${trainSaving} gCO₂e — ` +\n           `a saving of ${(topTrip.co2e_grams - trainSaving).toLocaleString()} gCO₂e per trip.`;\n    } else if (topCategory === 'medium') {\n      // Suggest replacing with active travel where feasible\n      const walkSaving = topTrip.co2e_grams;\n      r2 = `2. Your highest-emission trip was ${topTrip.distance_km} km by ${topTrip.mode} ` +\n           `(${topTrip.co2e_grams} gCO₂e). If this leg is under 5 km, replacing it with ` +\n           `cycling or walking saves the full ${walkSaving} gCO₂e at zero emission. ` +\n           `If longer, check if a direct train connection exists to avoid the ${topTrip.mode} leg.`;\n    } else {\n      // Already zero emission\n      r2 = `2. Your highest-emission trip (${topTrip.distance_km} km by ${topTrip.mode}) ` +\n           `already produces near-zero emissions. Maintain this pattern — ` +\n           `it sets a strong baseline for comparison in future weeks.`;\n    }\n  } else {\n    r2 = `2. Review your trip data for Week ${targetWeek} and identify any car or taxi journeys ` +\n         `that could be replaced with public transport or active travel.`;\n  }\n\n  // ── Recommendation 3 — week comparison ──────────────────────────────────\n  let r3;\n  if (comparison && !comparison.error && comparison.change_pct !== null) {\n    if (comparison.change_pct > 0) {\n      r3 = `3. Emissions were ${comparison.change_pct}% higher than Week ${prevWeek} ` +\n           `(${comparison.week1.total_co2e.toLocaleString()} → ` +\n           `${comparison.week2.total_co2e.toLocaleString()} gCO₂e). ` +\n           `Identify which journeys changed between the two weeks and target those first.`;\n    } else if (comparison.change_pct < 0) {\n      r3 = `3. Emissions were ${Math.abs(comparison.change_pct)}% lower than Week ${prevWeek} ` +\n           `(${comparison.week1.total_co2e.toLocaleString()} → ` +\n           `${comparison.week2.total_co2e.toLocaleString()} gCO₂e). ` +\n           `The travel choices that changed are worth protecting — keep this pattern next week.`;\n    } else {\n      r3 = `3. Emissions were essentially unchanged from Week ${prevWeek}. ` +\n           `Set a small target: replace one higher-emission journey next week ` +\n           `to begin a downward trend.`;\n    }\n  } else {\n    r3 = `3. Use Week ${targetWeek} (${summary.total_co2e.toLocaleString()} gCO₂e) as your ` +\n         `baseline. Compare it week by week to track whether your travel choices are improving.`;\n  }\n\n  return [r1, r2, r3].join('\\n');\n}\n\n// ─────────────────────────────────────────────────────────────\n// SYSTEM PROMPT — tells the AI about emission levels per mode\n// so it never suggests reducing an already low-emission mode\n// ─────────────────────────────────────────────────────────────\nconst toneGuide = alertMode\n  ? 'Tone: URGENT. Lead with the dominant emission source and highest single trip.'\n  : 'Tone: BALANCED. Focus on the most achievable change.';\n\nconst modeContext = `\nEMISSION FACTORS (gCO₂e per km) — use these when evaluating modes:\n  HIGH EMISSION  → car: 170, taxi: 186, motorcycle: 103, flight_domestic: 246\n  MEDIUM EMISSION → bus: 89, ferry: 18.9, ev_car: 47\n  LOW EMISSION   → train: 35.7, subway: 27.3, tram: 28.9, e_bicycle: 4.5\n  ZERO EMISSION  → bicycle: 0, walking: 0\n\nIMPORTANT RULES FOR RECOMMENDATIONS:\n- Never tell someone to reduce a zero or low-emission mode (bicycle, walking, train, subway).\n- If the dominant mode is already low-emission, recommend replacing any remaining HIGH-emission trips instead.\n- If the person already uses subway, suggest cycling or walking for short legs as an upgrade — not switching to train (they may already use train).\n- Always recommend switching HIGH-emission modes to lower ones, not the reverse.`.trim();\n\nconst systemPrompt = `You are a carbon footprint analysis agent.\n\nYour task: investigate Week ${targetWeek} transport emissions and write 3 recommendations.\n\n${contextNote ? 'Context: ' + contextNote : ''}\n${toneGuide}\n\n${modeContext}\n\nTOOLS YOU MUST USE:\n- get_weekly_summary(week_number)   → total CO2e and breakdown by mode\n- get_top_trips(week_number, count) → highest-emission individual trips\n- compare_weeks(week1, week2)       → compare two weeks\n\nMANDATORY RULES:\n1. Call get_weekly_summary(${targetWeek}) first.\n2. Call get_top_trips(${targetWeek}, 3) second.\n3. Only after at least 2 tool calls, write FINAL RECOMMENDATIONS.\n4. Every number MUST come from a tool result. Never invent figures.\n5. Never recommend reducing a low or zero emission mode.\n\nTOOL CALL FORMAT:\nAction: tool_name(argument1, argument2)\n\nWhen ready:\nFINAL RECOMMENDATIONS:\n1. [specific, with real numbers from tool results]\n2. [specific, with real numbers from tool results]\n3. [specific, with real numbers from tool results]`.trim();\n\n// ─────────────────────────────────────────────────────────────\n// REACT LOOP\n// ─────────────────────────────────────────────────────────────\nconst messages = [\n  { role: 'system', content: systemPrompt },\n  { role: 'user',   content: `Investigate Week ${targetWeek} transport emissions. Start by calling get_weekly_summary(${targetWeek}).` }\n];\n\nconst auditTrace = [];\nlet finalRecommendations = null;\nlet agentSource          = 'ollama';\nlet toolCallsMade        = 0;\n\nfor (let step = 0; step < MAX_STEPS; step++) {\n  let data;\n\n  try {\n    data = await this.helpers.httpRequest({\n      method:  'POST',\n      url:     OLLAMA_URL,\n      headers: { 'Content-Type': 'application/json' },\n      body: {\n        model:   MODEL,\n        messages,\n        stream:  false,\n        options: { temperature: 0.2, num_predict: 500 }\n      },\n      json:    true,\n      timeout: 120000\n    });\n  } catch (error) {\n    auditTrace.push({ step: step + 1, status: 'ollama_error', message: error.message });\n    finalRecommendations = buildFallback();\n    agentSource = 'fallback';\n    break;\n  }\n\n  const responseText = data?.message?.content?.trim() || '';\n  const extracted    = extractRecommendations(responseText);\n\n  if (extracted) {\n    if (toolCallsMade >= 2) {\n      finalRecommendations = extracted;\n      auditTrace.push({ step: step + 1, status: 'final_recommendations_accepted', tools_called: toolCallsMade });\n      break;\n    } else {\n      messages.push({ role: 'assistant', content: responseText });\n      messages.push({\n        role:    'user',\n        content: `You have not called any tools yet. You MUST call get_weekly_summary(${targetWeek}) before writing recommendations. Use the exact format: Action: get_weekly_summary(${targetWeek})`\n      });\n      auditTrace.push({ step: step + 1, status: 'recommendations_rejected_no_tools', tools_called: toolCallsMade });\n      continue;\n    }\n  }\n\n  const action = parseAction(responseText);\n\n  if (!action) {\n    messages.push({ role: 'assistant', content: responseText });\n    messages.push({\n      role:    'user',\n      content: `No valid tool call detected. Use exactly: Action: get_weekly_summary(${targetWeek})`\n    });\n    auditTrace.push({ step: step + 1, status: 'invalid_tool_call' });\n    continue;\n  }\n\n  const observation = dispatchTool(action.name, action.args);\n  toolCallsMade++;\n\n  auditTrace.push({ step: step + 1, tool: action.name, arguments: action.args, observation });\n\n  messages.push({ role: 'assistant', content: `Action: ${action.name}(${action.args.join(', ')})` });\n  messages.push({\n    role:    'user',\n    content: `Observation:\\n${JSON.stringify(observation, null, 2)}\\n\\n${\n      toolCallsMade >= 2\n        ? 'You have called ' + toolCallsMade + ' tools. You may now write FINAL RECOMMENDATIONS.'\n        : 'Good. Now call get_top_trips(' + targetWeek + ', 3).'\n    }`\n  });\n}\n\nif (!finalRecommendations) {\n  finalRecommendations = buildFallback();\n  agentSource = 'fallback';\n  auditTrace.push({ status: 'max_steps_reached_using_fallback', tools_called: toolCallsMade });\n}\n\nreturn [{\n  json: {\n    ...input,\n    recommendations:       finalRecommendations,\n    reasoning_trace:       auditTrace,\n    alert_mode:            alertMode,\n    tone,\n    recommendation_source: agentSource,\n    tools_called:          toolCallsMade\n  }\n}];"
+      },
+      "id": "7fc84bad-ed0b-4d8c-8e5a-a257b6cb98c5",
+      "name": "ReAct Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c615e50f-15dd-40e0-8a33-18842e64092f",
+              "leftValue": "={{ $json.alert_mode }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0ea30489-060b-4e0b-8486-2b2cf0d4e4f2",
+      "name": "IF Alert Mode",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst dom = d.dominant_mode.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());\nconst message = `\\u26a0\\ufe0f EMISSIONS ALERT \\u2014 Week ${d.week}\\n\\nEmissions rose ${d.change_pct}% this week \\u2014 immediate action recommended.\\n\\nTotal:       ${d.total_co2e.toLocaleString()} gCO\\u2082e\\nLast week:   ${d.prev_total ? d.prev_total.toLocaleString() + ' gCO\\u2082e' : 'N/A'}\\nMain source: ${dom} (${d.dominant_pct}% of emissions)\\n\\n\\ud83d\\udccb Priority Actions:\\n\\n${d.recommendations}\\n\\n\\u2014 Carbon Footprint AI Assistant | DEFRA 2023 factors`;\nreturn [{json:{message}}];"
+      },
+      "id": "0a5ac1cd-0354-401c-b7e9-9d4721006c8b",
+      "name": "Format Alert Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst dom = d.dominant_mode.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());\nconst trendLine = d.trend==='first week'?'First week \\u2014 baseline established.'\n  :d.trend==='increasing'?`\\u25b2 Up ${d.change_pct}% from last week`\n  :d.trend==='decreasing'?`\\u25bc Down ${Math.abs(d.change_pct)}% from last week`\n  :`\\u2192 Stable vs last week (${d.change_pct>=0?'+':''}${d.change_pct}%)`;\nconst message = `\\ud83c\\udf0d Weekly Carbon Briefing \\u2014 Week ${d.week}\\n\\nTotal: ${d.total_co2e.toLocaleString()} gCO\\u2082e\\n${trendLine}\\nMain source: ${dom} (${d.dominant_pct}% of emissions)\\n\\n\\ud83d\\udccb Recommendations:\\n\\n${d.recommendations}\\n\\n\\u2014 Carbon Footprint AI Assistant | DEFRA 2023 factors`;\nreturn [{json:{message}}];"
+      },
+      "id": "44d18ee3-7642-4aee-8b62-6159867bb97b",
+      "name": "Format Standard Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        368
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bcaf6ec6-c11a-412a-b2fd-2c4d1cade8b2",
+      "name": "Merge 2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://matrix.org/_matrix/client/v3/rooms/!ClQqEeYZQKmoWQvupH:matrix.org/send/m.room.message/{{ Date.now() }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer mat_iYiJ7stnj2y8ZlqXtoZrhWem1UXr7e_0MOD2e"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({msgtype: 'm.text', body: $json.message}) }}",
+        "options": {}
+      },
+      "id": "ee728655-f802-45e8-a45c-dd282fc68690",
+      "name": "Send to Matrix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read CSV": {
+      "main": [
+        [
+          {
+            "node": "Calculate Emissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Emissions": {
+      "main": [
+        [
+          {
+            "node": "Aggregate by Week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate by Week": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Set Critical Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Standard Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Critical Context": {
+      "main": [
+        [
+          {
+            "node": "Merge 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Standard Context": {
+      "main": [
+        [
+          {
+            "node": "Merge 1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge 1": {
+      "main": [
+        [
+          {
+            "node": "ReAct Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ReAct Agent": {
+      "main": [
+        [
+          {
+            "node": "IF Alert Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Alert Mode": {
+      "main": [
+        [
+          {
+            "node": "Format Alert Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Standard Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert Briefing": {
+      "main": [
+        [
+          {
+            "node": "Merge 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Standard Briefing": {
+      "main": [
+        [
+          {
+            "node": "Merge 2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge 2": {
+      "main": [
+        [
+          {
+            "node": "Send to Matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "23349d09-1803-4037-a4dd-13f4e92f3284",
+  "meta": {
+    "instanceId": "cfa4886d13a3c89b07e9b72f5c77f1d0c399dcc7db8f78644052cc4fa1663a00"
+  },
+  "nodeGroups": [],
+  "id": "OgzqhoTOcZ7F7RBm",
+  "tags": []
+}
