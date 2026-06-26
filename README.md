@@ -148,31 +148,6 @@ The dataset was designed to simulate realistic commuting behaviour while preserv
 
 ---
 
-## 📂 Project Structure
-
-```text
-carbon-footprint-ai-assistant/
-
-├── data/
-│   ├── synthetic_data.csv
-│   └── emission_factors.json
-│
-├── scripts/
-│   ├── emissions_calculator.py
-│   ├── aggregate.py
-│   ├── react_agent.py
-│   ├── matrix_sender.py
-│   ├── verify_pipeline.py
-│   └── evaluate_recommendations.py
-│
-├── workflows/
-│   └── carbon_footprint_workflow.json
-│
-└── docker-compose.yml
-```
-
----
-
 ## 🔮 Future Improvements
 
 * Google Maps Timeline integration
