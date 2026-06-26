@@ -1,59 +1,202 @@
-# carbon-footprint-ai-assistant
-PROJECT: Carbon Footprint AI Assistant — University BIP Project, Hochschule Heilbronn, team of 5 students.
-WHAT IT DOES: A fully automated agentic AI pipeline that reads weekly transport data per persona, calculates CO₂ emissions using official factors, routes through a two-branch decision system, runs an AI agent that autonomously investigates the data, and delivers personalised weekly briefings to a Matrix/Element chat room — one briefing per persona, no manual steps.
-TECH STACK:
+# 🌍 Carbon Footprint AI Assistant
 
-n8n (self-hosted via Docker) — 12-node visual workflow orchestrator, runs locally on laptop
-Python — deterministic emissions calculation using DEFRA 2023 factors, verified and auditable
-Ollama + Mistral 7B — local LLM, no external API, no data leaves the laptop
-Matrix/Element — open-source GDPR-compliant messaging protocol for briefing delivery
-Synthetic CSV dataset — 293 records, 6 personas, 4 weeks, 6 transport modes (car, train, bus, bicycle, walking, subway), designed with realistic week-to-week behavioural variation
+> **An Agentic AI pipeline that analyzes transportation behaviour, calculates CO₂ emissions, reasons over weekly trends, and automatically delivers personalized sustainability briefings using a local Large Language Model.**
 
-PIPELINE (12 nodes):
+Developed as part of the **Erasmus BIP – Agentic AI Solutions for Sustainable Innovation** at **Hochschule Heilbronn**.
 
-Manual Trigger → Read CSV → Calculate Emissions → Aggregate by Week (per persona) → Switch (2 branches) → Set Context → Merge → ReAct Agent → IF Alert → Format Message → Merge → Send to Matrix
-TWO BRANCHES:
+---
 
-Critical branch (⚠️): triggers when emissions increase more than 10% week-on-week → urgent tone, alert header, priority actions
-Standard branch (🌍): everything else (stable, decreasing, first week) → balanced tone, normal briefing
+## 🚀 Overview
 
-THREE PERSONAS — each receives their own personalised briefing:
-PersonaProfileNormal weekSpike weekBranchcar_001Urban car commuter18,117 gCO₂e25,619 gCO₂e (+42%)⚠️ Criticalhyb_001Hybrid commuter (train + car + bus)13,176 gCO₂e20,951 gCO₂e (+59%)⚠️ Criticalpt_001Public transport user (train + subway)8,950 gCO₂estable🌍 Standard
-REACT AGENT: The AI does not receive pre-computed answers. It autonomously calls three tools — get_weekly_summary(), get_top_trips(), compare_weeks() — in a Think→Act→Observe loop, deciding what to investigate before writing recommendations. The system enforces that at least 2 tool calls must be made before recommendations are accepted. If Ollama times out, a grounded deterministic fallback generates recommendations using real numbers from the data — the pipeline never fails silently.
-MODE-AWARE RECOMMENDATIONS: The agent knows the emission factor of every transport mode (car: 170, train: 35.7, subway: 27.3, bicycle: 0 gCO₂e/km). It never tells a public transport user to reduce train journeys. For pt_001 it correctly recommends replacing the subway leg with cycling to save 218 gCO₂e per trip — the only genuine improvement available to an already sustainable commuter.
-VERIFIED SAMPLE OUTPUTS:
-Critical alert (car_001, spike week):
+The Carbon Footprint AI Assistant demonstrates how Agentic AI can automate sustainability reporting from end to end.
 
-"⚠️ EMISSIONS ALERT — CAR 001 — Week 3. Emissions rose 42%. Total: 25,619 gCO₂e. Car: 100%. Highest trip: 14.2km car → 2,414 gCO₂e. Switching to train saves 1,906 gCO₂e on that single journey."
+Instead of simply calculating emissions, the system:
 
-Standard briefing (pt_001, normal week):
+* Calculates trip-level CO₂ emissions using official DEFRA 2023 emission factors.
+* Aggregates weekly transportation behaviour for each user.
+* Detects significant emission changes.
+* Dynamically selects a recommendation strategy (Standard or Critical).
+* Uses a local LLM (Mistral via Ollama) to generate personalized sustainability recommendations.
+* Automatically delivers weekly reports through Matrix/Element.
 
-"🌍 Weekly Briefing — PT 001 — Week 5. Total: 8,950 gCO₂e. Stable (+0.2%). Main source: Train (88%). Your transport mix is already sustainable. Consider replacing the 4km subway leg with cycling — saves 218 gCO₂e per trip at zero emissions."
+---
 
-DEMO FLOW:
+## 🏗️ System Architecture
 
-Pre-load 3 weeks per persona in Element showing the full story (normal → spike → recovery)
-Point out car_001 and hyb_001 both have ⚠️ alert messages during spike weeks
-Point out pt_001 consistently shows 🌍 Standard — already sustainable
-Trigger live run in n8n → watch 12 nodes execute one by one
-Week 4 briefing for selected persona arrives in Element live
-Click ReAct Agent node → show reasoning_trace in JSON output panel as proof of autonomous tool investigation
+```text
+Transportation Dataset
+        │
+        ▼
+Emissions Calculator
+        │
+        ▼
+Weekly Aggregation
+        │
+        ▼
+Decision Engine
+(Standard / Critical)
+        │
+        ▼
+ReAct Agent
+(Mistral via Ollama)
+        │
+        ▼
+Weekly Carbon Briefing
+        │
+        ▼
+Matrix / Element
+```
 
-KEY TALKING POINTS:
+---
 
-All inference runs locally — no data sent to any external server
-Every CO₂ number traces to a specific DEFRA 2023 factor (fully auditable)
-The AI decides what to investigate — the sequence is not hardcoded
-The system makes a routing decision (Critical vs Standard) based on what it finds in the data
-Three different personas produce three completely different emission profiles and recommendation styles
-The substitution test: you cannot replace the ReAct agent with a text template because a template cannot call tools, read the results, and decide what to investigate next
-Even when Ollama is slow, the grounded fallback produces accurate data-driven recommendations — the pipeline never outputs invented numbers
+## ⚙️ Technology Stack
 
-LIMITATIONS ACKNOWLEDGED:
+| Technology           | Purpose                                               |
+| -------------------- | ----------------------------------------------------- |
+| **Python**           | Emissions calculation, aggregation and business logic |
+| **n8n**              | Workflow orchestration and automation                 |
+| **Mistral 7B**       | AI-powered recommendation generation                  |
+| **Ollama**           | Local LLM runtime (offline inference)                 |
+| **Matrix / Element** | Automated report delivery                             |
+| **Docker**           | Self-hosted deployment                                |
+| **DEFRA 2023**       | Official CO₂ emission factors                         |
+| **GitHub**           | Version control and collaboration                     |
 
-Synthetic data — real data collection requires GDPR consent infrastructure and ethics approval, out of scope for a 4-week project
-DEFRA UK factors used — production would use German Umweltbundesamt (UBA) factors; the calculator is factor-agnostic, one JSON file swap required
-Mistral 7B sometimes completes tool calls slowly and falls back to deterministic recommendations — a larger model would be more reliable
-Three representative personas shown in demo — full system supports all 6 in the dataset
+---
 
-FUTURE WORK: Real data collection via Google Forms or Google Maps Timeline API, per-user private Matrix rooms, LangGraph for multi-week agent memory, natural language trip input ("took an Uber to the station"), mobile app for trip logging.
+## 🔄 Workflow
+
+```text
+Manual Trigger
+      │
+      ▼
+Read Transportation Dataset
+      │
+      ▼
+Calculate CO₂ Emissions
+      │
+      ▼
+Aggregate Weekly Trends
+      │
+      ▼
+Switch
+(Standard / Critical)
+      │
+      ▼
+Set AI Context
+      │
+      ▼
+ReAct Agent
+      │
+      ▼
+Format Weekly Briefing
+      │
+      ▼
+Matrix / Element
+```
+
+---
+
+## 🤖 Agentic AI Pipeline
+
+Unlike a traditional reporting workflow, the AI agent reasons over the transportation data before generating recommendations.
+
+The ReAct agent follows a **Think → Act → Observe** loop and uses internal tools to:
+
+* Retrieve weekly summaries
+* Compare historical emission trends
+* Identify the highest-emission journeys
+* Generate data-grounded sustainability recommendations
+
+The recommendation strategy automatically changes depending on the detected trend:
+
+* **⚠️ Critical:** More than **10%** increase in weekly emissions.
+* **🌍 Standard:** Stable, decreasing, or first-week emissions.
+
+---
+
+## 📊 Dataset
+
+The synthetic transportation dataset contains:
+
+* **293 transportation records**
+* **6 commuter personas**
+* **4 weeks of weekday travel**
+* **6 transportation modes**
+
+  * Car
+  * Train
+  * Bus
+  * Subway
+  * Bicycle
+  * Walking
+
+The dataset was designed to simulate realistic commuting behaviour while preserving privacy.
+
+---
+
+## ✨ Key Features
+
+* End-to-end Agentic AI workflow
+* Deterministic CO₂ calculations using DEFRA 2023 factors
+* Weekly trend detection and routing logic
+* Personalized sustainability recommendations
+* Local AI inference (no external APIs)
+* Automated Matrix/Element report delivery
+* Docker-based deployment
+* Modular Python architecture
+
+---
+
+## 📂 Project Structure
+
+```text
+carbon-footprint-ai-assistant/
+
+├── data/
+│   ├── synthetic_data.csv
+│   └── emission_factors.json
+│
+├── scripts/
+│   ├── emissions_calculator.py
+│   ├── aggregate.py
+│   ├── react_agent.py
+│   ├── matrix_sender.py
+│   ├── verify_pipeline.py
+│   └── evaluate_recommendations.py
+│
+├── workflows/
+│   └── carbon_footprint_workflow.json
+│
+└── docker-compose.yml
+```
+
+---
+
+## 🔮 Future Improvements
+
+* Google Maps Timeline integration
+* Private Matrix rooms for individual users
+* LangGraph-based long-term agent memory
+* Natural language trip logging
+* Mobile application for transport tracking
+* Support for additional national emission factor databases
+
+---
+
+## 👥 Team
+
+**Erasmus BIP – Agentic AI Solutions for Sustainable Innovation**
+
+* Mayuresh Parche
+* Alexia Seulean
+* Sadeed Shanediwan
+* Roberta Aschilean
+* Ranitabh Mallick
+
+---
+
+## 📄 License
+
+Developed for academic and educational purposes as part of the Erasmus Blended Intensive Programme (BIP).
+
