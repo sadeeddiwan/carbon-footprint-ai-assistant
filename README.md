@@ -168,7 +168,6 @@ The dataset was designed to simulate realistic commuting behaviour while preserv
 * Sadeed Shanediwan
 * Roberta Aschilean
 * Ranitabh Mallick
-Add Ranitabh Mallick as project contributor
 ---
 
 ## 📄 License
